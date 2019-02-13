@@ -33,6 +33,7 @@
 })(function () {
   //Default config/variables
   var VERSION = '2.9.3';
+  var POSITIONS = ['bottom', 'top', 'right', 'left'];
 
   /**
    * IntroJs main class
@@ -89,7 +90,7 @@
       /* Set the overlay opacity */
       overlayOpacity: 0.8,
       /* Precedence of positions, when auto is enabled */
-      positionPrecedence: ["bottom", "top", "right", "left"],
+      positionPrecedence: POSITIONS.slice(),
       /* Disable an interaction with element? */
       disableInteraction: false,
       /* Set how much padding to be used around helper element */
@@ -137,8 +138,9 @@
           var floatingElementQuery = document.querySelector(".introjsFloatingElement");
 
           if (floatingElementQuery === null) {
-            floatingElementQuery = document.createElement('div');
-            floatingElementQuery.className = 'introjsFloatingElement';
+            floatingElementQuery = _createElement('div', {
+              className: 'introjsFloatingElement'
+            });
 
             document.body.appendChild(floatingElementQuery);
           }
@@ -265,20 +267,43 @@
     this._introItems = introItems;
 
     //add overlay layer to the page
-    if(_addOverlayLayer.call(this, targetElm)) {
-      //then, start the show
-      _nextStep.call(this);
+    _addOverlayLayer.call(this, targetElm);
 
-      if (this._options.keyboardNavigation) {
-        DOMEvent.on(window, 'keydown', _onKeyDown, this, true);
-      }
-      //for window resize
-      DOMEvent.on(window, 'resize', _onResize, this, true);
+    //then, start the show
+    _nextStep.call(this);
+
+    if (this._options.keyboardNavigation) {
+      DOMEvent.on(window, 'keydown', _onKeyDown, this, true);
     }
+    //for window resize
+    DOMEvent.on(window, 'resize', _onResize, this, true);
+
     return false;
   }
 
+  var animationTimeout = null;
+  var transitioning = null;
+
   function _onResize () {
+    
+    // disable animations for smoothness
+    // on repeated resizes
+
+    if (!transitioning) {
+      transitioning = document.querySelectorAll('.introjs-transition');
+      _forEach(transitioning, function (elem) {
+        _removeClass(elem, 'introjs-transition');
+      });
+    }
+    window.clearTimeout( animationTimeout );
+    animationTimeout = window.setTimeout(function () {
+      // add class
+      _forEach(transitioning, function (elem) {
+        _addClass(elem, 'introjs-transition');
+      });
+      transitioning = null;
+    }, 300);
+
     this.refresh.call(this);
   }
 
@@ -486,12 +511,15 @@
     _setHelperLayerPosition.call(this, document.querySelector('.introjs-disableInteraction'));
 
     // re-align tooltip
-    if(this._currentStep !== undefined && this._currentStep !== null) {
+    if (this._currentStep !== undefined) {
       var oldHelperNumberLayer = document.querySelector('.introjs-helperNumberLayer'),
-        oldArrowLayer        = document.querySelector('.introjs-arrow'),
-        oldtooltipContainer  = document.querySelector('.introjs-tooltip');
+          oldArrowLayer        = document.querySelector('.introjs-arrow'),
+          oldtooltipContainer  = document.querySelector('.introjs-tooltip');
       _placeTooltip.call(this, this._introItems[this._currentStep].element, oldtooltipContainer, oldArrowLayer, oldHelperNumberLayer);
     }
+
+    // re-align overlay 
+    _setShowElement.call(this, this._introItems[this._currentStep]);
 
     //re-align hints
     _reAlignHints.call(this);
@@ -534,6 +562,9 @@
       }.bind(this));
     }
 
+    var overlayLayer = targetElement.querySelector('.introjs-overlay-container');
+    overlayLayer.parentNode.removeChild(overlayLayer);
+
     //remove all helper layers
     var helperLayer = targetElement.querySelector('.introjs-helperLayer');
     if (helperLayer) {
@@ -558,12 +589,6 @@
     }
 
     _removeShowElement();
-
-    //remove `introjs-fixParent` class from the elements
-    var fixParents = document.querySelectorAll('.introjs-fixParent');
-    _forEach(fixParents, function (parent) {
-      _removeClass(parent, /introjs-fixParent/g);
-    });
 
     //clean listeners
     DOMEvent.off(window, 'keydown', _onKeyDown, this, true);
@@ -935,6 +960,28 @@
   }
 
   /**
+  * Gets the coordinates for the helper layer position
+  *
+  * @return {Object}
+  */
+  function _getHelperLayerPosition () {
+    var currentElement  = this._introItems[this._currentStep],
+        elementPosition = _getOffset(currentElement.element),
+        widthHeightPadding = this._options.helperElementPadding;
+
+    if (currentElement.position === 'floating') {
+      widthHeightPadding = 0;
+    }
+
+    return {
+      width:  (elementPosition.width  + widthHeightPadding),
+      height: (elementPosition.height + widthHeightPadding),
+      top:    (elementPosition.top    - widthHeightPadding / 2),
+      left:   (elementPosition.left   - widthHeightPadding / 2)
+    };
+  }
+
+  /**
    * Update the position of the helper layer on the screen
    *
    * @api private
@@ -947,8 +994,7 @@
       if (!this._introItems[this._currentStep]) return;
 
       var currentElement  = this._introItems[this._currentStep],
-          elementPosition = _getOffset(currentElement.element),
-          widthHeightPadding = this._options.helperElementPadding;
+          pos = _getHelperLayerPosition.call(this);
 
       // If the target element is fixed, the tooltip should be fixed as well.
       // Otherwise, remove a fixed class that may be left over from the previous
@@ -958,17 +1004,10 @@
       } else {
         _removeClass(helperLayer, 'introjs-fixedTooltip');
       }
-
-      if (currentElement.position === 'floating') {
-        widthHeightPadding = 0;
-      }
-
-      //set new position to helper layer
-      helperLayer.style.cssText = 'width: ' + (elementPosition.width  + widthHeightPadding)  + 'px; ' +
-                                        'height:' + (elementPosition.height + widthHeightPadding)  + 'px; ' +
-                                        'top:'    + (elementPosition.top    - widthHeightPadding / 2)   + 'px;' +
-                                        'left: '  + (elementPosition.left   - widthHeightPadding / 2)   + 'px;';
-
+      _setStyle(helperLayer,  'width: ' + pos.width + 'px;' +
+                              'height: ' + pos.height + 'px;' +
+                              'top: ' + pos.top + 'px;' +
+                              'left: ' + pos.left + 'px;');
     }
   }
 
@@ -982,8 +1021,9 @@
     var disableInteractionLayer = document.querySelector('.introjs-disableInteraction');
 
     if (disableInteractionLayer === null) {
-      disableInteractionLayer = document.createElement('div');
-      disableInteractionLayer.className = 'introjs-disableInteraction';
+      disableInteractionLayer = _createElement('div', {
+        className: 'introjs-disableInteraction'
+      });
       this._targetElement.appendChild(disableInteractionLayer);
     }
 
@@ -1016,7 +1056,7 @@
     var self = this,
         oldHelperLayer = document.querySelector('.introjs-helperLayer'),
         oldReferenceLayer = document.querySelector('.introjs-tooltipReferenceLayer'),
-        highlightClass = 'introjs-helperLayer',
+        highlightClass = 'introjs-helperLayer introjs-transition',
         nextTooltipButton,
         prevTooltipButton,
         skipTooltipButton,
@@ -1097,7 +1137,8 @@
             oldReferenceLayer.querySelector('.introjs-bullets li > a.active').className = '';
             oldReferenceLayer.querySelector('.introjs-bullets li > a[data-stepnumber="' + targetElement.step + '"]').className = 'active';
         }
-        oldReferenceLayer.querySelector('.introjs-progress .introjs-progressbar').style.cssText = 'width:' + _getProgress.call(self) + '%;';
+        _setStyle(oldReferenceLayer.querySelector('.introjs-progress .introjs-progressbar'), 'width:' + _getProgress.call(self) + '%;');
+
         oldReferenceLayer.querySelector('.introjs-progress .introjs-progressbar').setAttribute('aria-valuenow', _getProgress.call(self));
 
         //show the tooltip
@@ -1119,17 +1160,31 @@
 
       // end of old element if-else condition
     } else {
-      var helperLayer       = document.createElement('div'),
-          referenceLayer    = document.createElement('div'),
-          arrowLayer        = document.createElement('div'),
-          tooltipLayer      = document.createElement('div'),
-          tooltipTextLayer  = document.createElement('div'),
-          bulletsLayer      = document.createElement('div'),
-          progressLayer     = document.createElement('div'),
-          buttonsLayer      = document.createElement('div');
-
-      helperLayer.className = highlightClass;
-      referenceLayer.className = 'introjs-tooltipReferenceLayer';
+      var helperLayer       = _createElement('div', {
+            className: highlightClass,
+          }),
+          referenceLayer    = _createElement('div', {
+            className: 'introjs-tooltipReferenceLayer introjs-transition'
+          }),
+          arrowLayer        = _createElement('div', {
+            className: 'introjs-arrow'
+          }),
+          tooltipLayer      = _createElement('div', {
+            className: 'introjs-tooltip introjs-transition'
+          }),
+          tooltipTextLayer  = _createElement('div', {
+            className: 'introjs-tooltiptext',
+            innerHTML: targetElement.intro
+          }),
+          bulletsLayer      = _createElement('div', {
+            className: 'introjs-bullets'
+          }),
+          progressLayer     = _createElement('div', {
+            className: 'introjs-progress'
+          }),
+          buttonsLayer      = _createElement('div', {
+            className: 'introjs-tooltipbuttons'
+          });
 
       // scroll to element
       scrollParent = _getScrollParent( targetElement.element );
@@ -1147,40 +1202,34 @@
       this._targetElement.appendChild(helperLayer);
       this._targetElement.appendChild(referenceLayer);
 
-      arrowLayer.className = 'introjs-arrow';
-
-      tooltipTextLayer.className = 'introjs-tooltiptext';
-      tooltipTextLayer.innerHTML = targetElement.intro;
-
-      bulletsLayer.className = 'introjs-bullets';
-
       if (this._options.showBullets === false) {
         bulletsLayer.style.display = 'none';
       }
 
-      var ulContainer = document.createElement('ul');
-      ulContainer.setAttribute('role', 'tablist');
+      var ulContainer = _createElement('ul', {
+        role: 'tablist'
+      });
 
       var anchorClick = function () {
-          self.goToStep(this.getAttribute('data-stepnumber'));
+        self.goToStep(this.getAttribute('data-stepnumber'));
       };
 
       _forEach(this._introItems, function (item, i) {
-        var innerLi    = document.createElement('li');
-        var anchorLink = document.createElement('a');
-        
-        innerLi.setAttribute('role', 'presentation');
-        anchorLink.setAttribute('role', 'tab');
-
-        anchorLink.onclick = anchorClick;
+        var innerLi    = _createElement('li', {
+              role: 'presentation'
+            }),
+            anchorLink = _createElement('a', {
+              role: 'tab',
+              onclick: anchorClick,
+              innerHTML: '&nbsp;',
+              'data-stepnumber': item.step
+            });
 
         if (i === (targetElement.step-1)) {
           anchorLink.className = 'active';
-        } 
+        }
 
         _setAnchorAsButton(anchorLink);
-        anchorLink.innerHTML = "&nbsp;";
-        anchorLink.setAttribute('data-stepnumber', item.step);
 
         innerLi.appendChild(anchorLink);
         ulContainer.appendChild(innerLi);
@@ -1188,33 +1237,33 @@
 
       bulletsLayer.appendChild(ulContainer);
 
-      progressLayer.className = 'introjs-progress';
-
       if (this._options.showProgress === false) {
         progressLayer.style.display = 'none';
       }
-      var progressBar = document.createElement('div');
-      progressBar.className = 'introjs-progressbar';
-      progressBar.setAttribute('role', 'progress');
-      progressBar.setAttribute('aria-valuemin', 0);
-      progressBar.setAttribute('aria-valuemax', 100);
-      progressBar.setAttribute('aria-valuenow', _getProgress.call(this));
-      progressBar.style.cssText = 'width:' + _getProgress.call(this) + '%;';
+      
+      var progressBarPercent = _getProgress.call(this);
+      var progressBar = _createElement('div', {
+        className: 'introjs-progressbar',
+        role: 'progress',
+        'aria-valuemin': 0,
+        'aria-valuemax': 100,
+        'aria-valuenow': progressBarPercent,
+        style: 'width:' + progressBarPercent + '%;'
+      });
 
       progressLayer.appendChild(progressBar);
 
-      buttonsLayer.className = 'introjs-tooltipbuttons';
       if (this._options.showButtons === false) {
         buttonsLayer.style.display = 'none';
       }
 
-      tooltipLayer.className = 'introjs-tooltip';
       tooltipLayer.appendChild(tooltipTextLayer);
       tooltipLayer.appendChild(bulletsLayer);
       tooltipLayer.appendChild(progressLayer);
 
       //add helper layer number
-      var helperNumberLayer = document.createElement('span');
+      var helperNumberLayer = _createElement('span');
+      
       if (this._options.showStepNumbers === true) {
         helperNumberLayer.className = 'introjs-helperNumberLayer';
         helperNumberLayer.innerHTML = targetElement.step;
@@ -1225,51 +1274,45 @@
       referenceLayer.appendChild(tooltipLayer);
 
       //next button
-      nextTooltipButton = document.createElement('a');
-
-      nextTooltipButton.onclick = function() {
-        if (self._introItems.length - 1 !== self._currentStep) {
-          _nextStep.call(self);
-        }
-      };
+      nextTooltipButton = _createElement('a', {
+        onclick: function() {
+          if (self._introItems.length - 1 !== self._currentStep) {
+            _nextStep.call(self);
+          }
+        },
+        innerHTML: this._options.nextLabel
+      });
 
       _setAnchorAsButton(nextTooltipButton);
-      nextTooltipButton.innerHTML = this._options.nextLabel;
 
       //previous button
-      prevTooltipButton = document.createElement('a');
-
-      prevTooltipButton.onclick = function() {
-        if (self._currentStep !== 0) {
-          _previousStep.call(self);
-        }
-      };
+      prevTooltipButton = _createElement('a', {
+        onclick: function() {
+          if (self._currentStep !== 0) {
+            _previousStep.call(self);
+          }
+        },
+        innerHTML: this._options.prevLabel
+      });
 
       _setAnchorAsButton(prevTooltipButton);
-      prevTooltipButton.innerHTML = this._options.prevLabel;
 
       //skip button
-      skipTooltipButton = document.createElement('a');
-      skipTooltipButton.className = this._options.buttonClass + ' introjs-skipbutton ';
+      skipTooltipButton = _createElement('a', {
+        className: this._options.buttonClass + ' introjs-skipbutton',
+        innerHTML: this._options.skipLabel,
+        onclick: function() {
+          if (self._introItems.length - 1 === self._currentStep && typeof (self._introCompleteCallback) === 'function') {
+            self._introCompleteCallback.call(self);
+          }
+          if (typeof(self._introSkipCallback) === 'function') {
+            self._introSkipCallback.call(self);
+          }
+          _exitIntro.call(self, self._targetElement);
+        }
+      });
       _setAnchorAsButton(skipTooltipButton);
-      skipTooltipButton.innerHTML = this._options.skipLabel;
-
-      skipTooltipButton.onclick = function() {
-        if (self._introItems.length - 1 === self._currentStep && typeof (self._introCompleteCallback) === 'function') {
-          self._introCompleteCallback.call(self);
-        }
-
-        if (self._introItems.length - 1 !== self._currentStep && typeof (self._introExitCallback) === 'function') {
-          self._introExitCallback.call(self);
-        }
-
-        if (typeof(self._introSkipCallback) === 'function') {
-          self._introSkipCallback.call(self);
-        }
-
-        _exitIntro.call(self, self._targetElement);
-      };
-
+      
       buttonsLayer.appendChild(skipTooltipButton);
 
       //in order to prevent displaying next/previous button always
@@ -1364,16 +1407,12 @@
       }
     }
 
-    prevTooltipButton.setAttribute('role', 'button');
-    nextTooltipButton.setAttribute('role', 'button');
-    skipTooltipButton.setAttribute('role', 'button');
-
     //Set focus on "next" button, so that hitting Enter always moves you onto the next step
     if (typeof nextTooltipButton !== "undefined" && nextTooltipButton !== null) {
       nextTooltipButton.focus();
     }
 
-    _setShowElement(targetElement);
+    _setShowElement.call(this, targetElement);
 
     if (typeof (this._introAfterChangeCallback) !== 'undefined') {
       this._introAfterChangeCallback.call(this, targetElement.element);
@@ -1419,6 +1458,8 @@
     }
   }
 
+  var removeShowRegex = /introjs-[a-zA-Z]+/g;
+
   /**
    * To remove all show element(s)
    *
@@ -1429,7 +1470,7 @@
     var elms = document.querySelectorAll('.introjs-showElement');
 
     _forEach(elms, function (elm) {
-      _removeClass(elm, /introjs-[a-zA-Z]+/g);
+      _removeClass(elm, removeShowRegex);
     });
   }
 
@@ -1442,48 +1483,95 @@
    * @param {Object} targetElement
    */
   function _setShowElement(targetElement) {
-    var parentElm;
-    // we need to add this show element class to the parent of SVG elements
-    // because the SVG elements can't have independent z-index
-    if (targetElement.element instanceof SVGElement) {
-      parentElm = targetElement.element.parentNode;
+    var pos = _getHelperLayerPosition.call(this),
+        windowSize = _getWinSize(),
+        baseStyle = 'opacity: ' + this._options.overlayOpacity + ';',
+        styleText,
+        container = document.querySelector('.introjs-overlay-container'),
+        left = document.querySelector('.introjs-overlay-left'),
+        bottom = document.querySelector('.introjs-overlay-bottom'),
+        top = document.querySelector('.introjs-overlay-top'),
+        right = document.querySelector('.introjs-overlay-right');
+    
+    // set remaining coord details
+    pos.bottom = (pos.top + pos.height);
+    pos.right = (pos.left + pos.width);
 
-      while (targetElement.element.parentNode !== null) {
-        if (!parentElm.tagName || parentElm.tagName.toLowerCase() === 'body') break;
+    if (_isFixed(targetElement.element)) {
+      _addClass(container, 'introjs-fixedTooltip');
+    } else {
+      _removeClass(container, 'introjs-fixedTooltip');
+    }
 
-        if (parentElm.tagName.toLowerCase() === 'svg') {
-          _addClass(parentElm, 'introjs-showElement introjs-relativePosition');
-        }
+    // left
+    styleText = baseStyle;
+    styleText += 'top: 0px; left: 0px;';
+    // add max 0 to widths and heights for validity
+    styleText += 'width: ' + Math.max(0, pos.left) + 'px;';
+    styleText += 'height: ' + Math.max(0, pos.bottom) + 'px;';
+    _setStyle(left, styleText);
 
-        parentElm = parentElm.parentNode;
+    // bottom
+    styleText = baseStyle;
+    styleText += 'top: ' + pos.bottom + 'px; left: 0px; bottom: 0px;';
+    styleText += 'width: ' + Math.max(0, pos.right) + 'px;';
+    _setStyle(bottom, styleText);
+
+    // top
+    styleText = baseStyle;
+    styleText += 'top: 0px; right: 0px;';
+    styleText += 'width: ' + Math.max(0, (windowSize.width - pos.left)) + 'px;';
+    styleText += 'height: ' + Math.max(0, pos.top) + 'px;';
+    _setStyle(top, styleText);
+
+    // right
+    styleText = baseStyle;
+    styleText += 'top: ' + pos.top + 'px; bottom: 0px; right: 0px;';
+    styleText += 'width: ' + Math.max(0, (windowSize.width - pos.right)) + 'px;';
+    _setStyle(right, styleText);
+
+  }
+
+  /**
+  * Sets the style of an DOM element
+  *
+  * @param {Object} element
+  * @param {String} style
+  * @return null
+  */
+  function _setStyle(element, style) {
+    // super simple :D
+    element.style.cssText = style;
+  }
+
+  /* regex for matching attributes that
+  need to be set with setAttribute */
+  var setAttRegex = /^(?:role|data-|aria-)/;
+
+  /**
+  * Create a DOM element with various attributes
+  *
+  * @param {String} tagname
+  * @param {Object} atts
+  * @return Element
+  */
+  function _createElement(tagname, atts) {
+    var element = document.createElement(tagname);
+
+    atts = atts || {};
+
+    for (var k in atts) {
+      var v = atts[k];
+      if (k === 'style') {
+        _setStyle(element, v);
+      } else if (k.match(setAttRegex)) {
+        element.setAttribute(k, v);
+      } else {
+        element[k] = v;
       }
     }
 
-    _addClass(targetElement.element, 'introjs-showElement');
-
-    var currentElementPosition = _getPropValue(targetElement.element, 'position');
-    if (currentElementPosition !== 'absolute' &&
-        currentElementPosition !== 'relative' &&
-        currentElementPosition !== 'fixed') {
-      //change to new intro item
-      _addClass(targetElement.element, 'introjs-relativePosition');
-    }
-
-    parentElm = targetElement.element.parentNode;
-    while (parentElm !== null) {
-      if (!parentElm.tagName || parentElm.tagName.toLowerCase() === 'body') break;
-
-      //fix The Stacking Context problem.
-      //More detail: https://developer.mozilla.org/en-US/docs/Web/Guide/CSS/Understanding_z_index/The_stacking_context
-      var zIndex = _getPropValue(parentElm, 'z-index');
-      var opacity = parseFloat(_getPropValue(parentElm, 'opacity'));
-      var transform = _getPropValue(parentElm, 'transform') || _getPropValue(parentElm, '-webkit-transform') || _getPropValue(parentElm, '-moz-transform') || _getPropValue(parentElm, '-ms-transform') || _getPropValue(parentElm, '-o-transform');
-      if (/[0-9]+/.test(zIndex) || opacity < 1 || (transform !== 'none' && transform !== undefined)) {
-        _addClass(parentElm, 'introjs-fixParent');
-      }
-
-      parentElm = parentElm.parentNode;
-    }
+    return element;
   }
 
   /**
@@ -1722,12 +1810,8 @@
    * @returns {Object} width and height attributes
    */
   function _getWinSize() {
-    if (window.innerWidth !== undefined) {
-      return { width: window.innerWidth, height: window.innerHeight };
-    } else {
-      var D = document.documentElement;
-      return { width: D.clientWidth, height: D.clientHeight };
-    }
+    var D = document.documentElement;
+    return { width: D.clientWidth, height: D.clientHeight };
   }
 
   /**
@@ -1757,40 +1841,23 @@
    * @param {Object} targetElm
    */
   function _addOverlayLayer(targetElm) {
-    var overlayLayer = document.createElement('div'),
-        styleText = '',
-        self = this;
+    var self = this,
+        container = _createElement('div', {
+          className: 'introjs-overlay-container'
+        });
 
-    //set css class name
-    overlayLayer.className = 'introjs-overlay';
-
-    //check if the target element is body, we should calculate the size of overlay layer in a better way
-    if (!targetElm.tagName || targetElm.tagName.toLowerCase() === 'body') {
-      styleText += 'top: 0;bottom: 0; left: 0;right: 0;position: fixed;';
-      overlayLayer.style.cssText = styleText;
-    } else {
-      //set overlay layer position
-      var elementPosition = _getOffset(targetElm);
-      if (elementPosition) {
-        styleText += 'width: ' + elementPosition.width + 'px; height:' + elementPosition.height + 'px; top:' + elementPosition.top + 'px;left: ' + elementPosition.left + 'px;';
-        overlayLayer.style.cssText = styleText;
+    _forEach(POSITIONS, function (key) {
+      var overlay = _createElement('div', {
+        className: 'introjs-overlay introjs-transition introjs-overlay-' + key
+      });
+      if (self._options.exitOnOverlayClick) {
+        DOMEvent.on(overlay, 'click', function () {
+          _exitIntro.call(self, targetElm);
+        });
       }
-    }
-
-    targetElm.appendChild(overlayLayer);
-
-    overlayLayer.onclick = function() {
-      if (self._options.exitOnOverlayClick === true) {
-        _exitIntro.call(self, targetElm);
-      }
-    };
-
-    window.setTimeout(function() {
-      styleText += 'opacity: ' + self._options.overlayOpacity.toString() + ';';
-      overlayLayer.style.cssText = styleText;
-    }, 10);
-
-    return true;
+      container.appendChild( overlay );
+    });
+    targetElm.appendChild( container );
   }
 
   /**
@@ -2012,8 +2079,9 @@
     var hintsWrapper = document.querySelector('.introjs-hints');
 
     if (hintsWrapper === null) {
-      hintsWrapper = document.createElement('div');
-      hintsWrapper.className = 'introjs-hints';
+      hintsWrapper = _createElement('div', {
+        className: 'introjs-hints'
+      });
     }
 
     /**
@@ -2044,12 +2112,12 @@
         return;
       }
 
-      var hint = document.createElement('a');
+      var hint = _createElement('a', {
+        onclick: getHintClick(i),
+        className: 'introjs-hint'
+      });
+
       _setAnchorAsButton(hint);
-
-      hint.onclick = getHintClick(i);
-
-      hint.className = 'introjs-hint';
 
       if (!item.hintAnimation) {
         _addClass(hint, 'introjs-hint-no-anim');
@@ -2060,10 +2128,12 @@
         _addClass(hint, 'introjs-fixedhint');
       }
 
-      var hintDot = document.createElement('div');
-      hintDot.className = 'introjs-hint-dot';
-      var hintPulse = document.createElement('div');
-      hintPulse.className = 'introjs-hint-pulse';
+      var hintDot = _createElement('div', {
+        className: 'introjs-hint-dot'
+      });
+      var hintPulse = _createElement('div', {
+        className: 'introjs-hint-pulse introjs-transition'
+      });
 
       hint.appendChild(hintDot);
       hint.appendChild(hintPulse);
@@ -2170,49 +2240,49 @@
       return;
     }
 
-    var tooltipLayer = document.createElement('div');
-    var tooltipTextLayer = document.createElement('div');
-    var arrowLayer = document.createElement('div');
-    var referenceLayer = document.createElement('div');
-
-    tooltipLayer.className = 'introjs-tooltip';
-
-    tooltipLayer.onclick = function (e) {
-      //IE9 & Other Browsers
-      if (e.stopPropagation) {
-        e.stopPropagation();
+    var tooltipLayer = _createElement('div', {
+      className: 'introjs-tooltip',
+      onclick: function (e) {
+        //IE9 & Other Browsers
+        if (e.stopPropagation) {
+          e.stopPropagation();
+        }
+        //IE8 and Lower
+        else {
+          e.cancelBubble = true;
+        }
       }
-      //IE8 and Lower
-      else {
-        e.cancelBubble = true;
-      }
-    };
+    });
+    var tooltipTextLayer = _createElement('div', {
+      className: 'introjs-tooltiptext'
+    });
+    var arrowLayer = _createElement('div', {
+      className: 'introjs-arrow'
+    });
+    var referenceLayer = _createElement('div', {
+      className: 'introjs-tooltipReferenceLayer introjs-hintReference',
+      'data-step': hintElement.getAttribute('data-step')
+    });
+    var tooltipWrapper = _createElement('p', {
+      innerHTML: item.hint
+    });
 
-    tooltipTextLayer.className = 'introjs-tooltiptext';
-
-    var tooltipWrapper = document.createElement('p');
-    tooltipWrapper.innerHTML = item.hint;
-
-    var closeButton = document.createElement('a');
-    closeButton.className = this._options.buttonClass;
-    closeButton.setAttribute('role', 'button');
-    closeButton.innerHTML = this._options.hintButtonLabel;
-    closeButton.onclick = _hideHint.bind(this, stepId);
+    var closeButton = _createElement('a', {
+      className: this._options.buttonClass,
+      role: 'button',
+      innerHTML: this._options.hintButtonLabel,
+      onclick: _hideHint.bind(this, stepId)
+    });
 
     tooltipTextLayer.appendChild(tooltipWrapper);
     tooltipTextLayer.appendChild(closeButton);
-
-    arrowLayer.className = 'introjs-arrow';
     tooltipLayer.appendChild(arrowLayer);
-
     tooltipLayer.appendChild(tooltipTextLayer);
 
     // set current step for _placeTooltip function
     this._currentStep = hintElement.getAttribute('data-step');
 
     // align reference layer position
-    referenceLayer.className = 'introjs-tooltipReferenceLayer introjs-hintReference';
-    referenceLayer.setAttribute('data-step', hintElement.getAttribute('data-step'));
     _setHelperLayerPosition.call(this, referenceLayer);
 
     referenceLayer.appendChild(tooltipLayer);
